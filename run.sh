@@ -2,28 +2,20 @@
 
 set -e
 
-bashio::log.info "Starting SMS Gammu Gateway..."
+bashio::log.info "Starting SMS Keenetic Gateway..."
 
-# Check if configuration is valid
-DEVICE_PATH=$(bashio::config 'device_path')
-PIN=$(bashio::config 'pin')
+# Log configuration
+HOST=$(bashio::config 'keenetic_host')
 PORT=$(bashio::config 'port')
-USERNAME=$(bashio::config 'username')
-PASSWORD=$(bashio::config 'password')
+INTERFACE=$(bashio::config 'keenetic_modem_interface')
 
-bashio::log.info "Device path: ${DEVICE_PATH}"
-bashio::log.info "Port: ${PORT}"
-
-# Check if device exists
-if [ ! -c "${DEVICE_PATH}" ]; then
-    bashio::log.warning "Device ${DEVICE_PATH} not found. Please check your GSM modem connection."
-    bashio::log.info "Available tty devices:"
-    ls -la /dev/tty* || true
-fi
+bashio::log.info "Keenetic Host: ${HOST}"
+bashio::log.info "Modem Interface: ${INTERFACE}"
+bashio::log.info "API Port: ${PORT}"
 
 # Change to app directory
 cd /app
 
 # Start the application
-bashio::log.info "Starting SMS Gateway on port ${PORT}..."
+bashio::log.info "Starting SMS Gateway application..."
 python3 run.py

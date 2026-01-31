@@ -4,21 +4,15 @@ FROM $BUILD_FROM
 # Set shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install system dependencies required for gammu and python-gammu
+# Install system dependencies
 RUN apk update \
     && apk add --no-cache \
         python3 \
         python3-dev \
         py3-pip \
-        pkgconfig \
-        gammu \
-        gammu-dev \
         libffi-dev \
         gcc \
         musl-dev \
-        linux-headers \
-        usb-modeswitch \
-        usb-modeswitch-udev \
     && rm -rf /var/cache/apk/*
 
 # Create app directory
@@ -31,6 +25,7 @@ RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 # Copy application files
 COPY run.py .
 COPY support.py .
+COPY keenetic_client.py .
 COPY mqtt_publisher.py .
 COPY config.json .
 COPY run.sh .
@@ -45,11 +40,11 @@ EXPOSE 5000
 
 # Labels
 LABEL \
-    io.hass.name="SMS Gammu Gateway" \
-    io.hass.description="REST API SMS Gateway using python-gammu for USB GSM modems" \
+    io.hass.name="SMS Keenetic Gateway" \
+    io.hass.description="REST API SMS Gateway using Keenetic Router API" \
     io.hass.type="addon" \
-    io.hass.version="1.2.9" \
-    maintainer="PavelVe"
+    io.hass.version="1.0.0" \
+    maintainer="dalapenko"
 
 # Run
 CMD [ "./run.sh" ]

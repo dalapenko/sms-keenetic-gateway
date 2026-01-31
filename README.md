@@ -1,4 +1,4 @@
-# SMS Gammu Gateway Add-on
+# SMS Keenetic Gateway Add-on
 
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
@@ -6,28 +6,28 @@
 ![Supports armv7 Architecture][armv7-shield]
 ![Supports i386 Architecture][i386-shield]
 
-REST API SMS Gateway using python-gammu for USB GSM modems (SIM800L, Huawei, etc.)
+REST API SMS Gateway using Keenetic Router API (RCI) for SMS operations.
 
 ## About
 
-This add-on provides a complete SMS gateway solution for Home Assistant, replacing the deprecated "SMS notifications via GSM-modem" integration. It offers both REST API and MQTT interfaces for sending and receiving SMS messages through USB GSM modems.
+This add-on provides a complete SMS gateway solution for Home Assistant using a Keenetic Router with a 4G/LTE modem. It replaces the need for a directly connected USB modem by communicating with the router over the network. It offers both REST API and MQTT interfaces for sending and receiving SMS messages.
 
-**Based on** [pajikos/sms-gammu-gateway](https://github.com/pajikos/sms-gammu-gateway) (Apache License 2.0).
+**Modern replacement for:**
+- Direct USB GSM modem integrations
+- Gammu-based gateways
 
 ## 🌟 Key Features
 
 ### 📱 SMS Management
 - **Send SMS** via REST API, MQTT, or Home Assistant UI
-- **Flash SMS Support** ⚡ - Send urgent alerts that display on screen without saving to inbox (Class 0)
 - **Receive SMS** with automatic MQTT notifications
 - **Text Input Fields** directly in Home Assistant device
-- **Smart Buttons** for easy SMS sending from UI (normal + flash)
+- **Smart Buttons** for easy SMS sending from UI
 - **Phone Number Persistence** - keeps number for multiple messages
-- **Automatic Unicode Detection** - Czech/special characters handled automatically
 - **Delete All SMS Button** - Clear SIM card storage with one click
 - **Auto-delete SMS** - Optional automatic deletion after reading
 - **Reset Counter Button** - Reset SMS statistics
-- **Message Length Limit** - 255 characters max (longer messages split automatically by modem)
+- **Message Length Limit** - 255 characters max (limit of Home Assistant text sensor)
 
 ### 📊 Device Monitoring
 - **Signal Strength** sensor with percentage display
@@ -39,7 +39,7 @@ This add-on provides a complete SMS gateway solution for Home Assistant, replaci
 - **Modem Info** sensors (IMEI, Model, Manufacturer)
 - **SIM Card Info** (IMSI identification)
 - **SMS Storage Capacity** monitoring (used/total on SIM)
-- **Modem Status** tracking device connectivity
+- **Modem Status** tracking connectivity to router
 - **Real-time Updates** via MQTT with auto-discovery
 
 ### 🔧 Integration Options
@@ -51,8 +51,9 @@ This add-on provides a complete SMS gateway solution for Home Assistant, replaci
 
 ## Prerequisites
 
-- USB GSM modem supporting AT commands (SIM800L, Huawei E1750, etc.)
-- Modem must appear as `/dev/ttyUSB*` device
+- Keenetic Router with 4G/LTE modem (built-in or USB)
+- Router must be accessible via network from Home Assistant
+- Admin credentials for the router
 - SIM card with SMS capability
 - Optional: MQTT broker for full integration
 
@@ -60,88 +61,62 @@ This add-on provides a complete SMS gateway solution for Home Assistant, replaci
 
 1. Add repository to your Home Assistant:
    ```
-   https://github.com/pavelve/home-assistant-addons
+   https://github.com/dalapenko/sms-keenetic-gateway
    ```
-2. Find **SMS Gammu Gateway** in add-on store
+2. Find **SMS Keenetic Gateway** in add-on store
 3. Click Install
 4. Configure the add-on (see below)
 5. Start the add-on
 
 ## Configuration
 
-### Basic Settings
+### Router Connection Settings
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `device_path` | `/dev/ttyUSB0` | Path to your GSM modem device (see Device Path Options below) |
-| `pin` | `""` | SIM card PIN (leave empty if no PIN) |
-| `port` | `5000` | API port |
-| `ssl` | `false` | Enable HTTPS |
-| `username` | `admin` | API username |
-| `password` | `password` | API password (change this!) |
+| Option                     | Default       | Description                                          |
+|----------------------------|---------------|------------------------------------------------------|
+| `keenetic_host`            | `192.168.1.1` | IP address or hostname of your Keenetic router       |
+| `keenetic_username`        | `admin`       | Router admin username                                |
+| `keenetic_password`        | `""`          | Router admin password                                |
+| `keenetic_modem_interface` | `UsbLte0`     | Interface name of the modem (e.g., UsbLte0, UsbQmi0) |
+| `keenetic_use_https`       | `false`       | Use HTTPS for connection (recommended if configured) |
 
-#### Device Path Options
+### API Settings
 
-You can specify the modem path in two ways:
-
-**Option 1: By device name (simple, but may change)**
-```
-/dev/ttyUSB0
-```
-⚠️ **Warning:** This path can change if you disconnect/reconnect the modem or add other USB devices.
-
-**Option 2: By device ID (recommended, stable)**
-```
-/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
-```
-✅ **Recommended:** This path is unique and persistent across reboots and reconnections.
-
-To find your modem's stable ID, run in Home Assistant terminal:
-```bash
-ls -la /dev/serial/by-id/
-```
+| Option     | Default    | Description                       |
+|------------|------------|-----------------------------------|
+| `port`     | `5000`     | Local API port                    |
+| `ssl`      | `false`    | Enable HTTPS for local API        |
+| `username` | `admin`    | Local API username                |
+| `password` | `password` | Local API password (change this!) |
 
 ### MQTT Settings (Optional)
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `mqtt_enabled` | `false` | Enable MQTT integration |
-| `mqtt_host` | `core-mosquitto` | MQTT broker hostname |
-| `mqtt_port` | `1883` | MQTT broker port |
-| `mqtt_username` | `""` | MQTT username |
-| `mqtt_password` | `""` | MQTT password |
-| `mqtt_topic_prefix` | `homeassistant/sensor/sms_gateway` | Topic prefix |
-| `sms_monitoring_enabled` | `true` | Auto-detect incoming SMS |
-| `sms_check_interval` | `60` | SMS check interval (seconds) |
+| Option                   | Default                                     | Description                  |
+|--------------------------|---------------------------------------------|------------------------------|
+| `mqtt_enabled`           | `false`                                     | Enable MQTT integration      |
+| `mqtt_host`              | `core-mosquitto`                            | MQTT broker hostname         |
+| `mqtt_port`              | `1883`                                      | MQTT broker port             |
+| `mqtt_username`          | `""`                                        | MQTT username                |
+| `mqtt_password`          | `""`                                        | MQTT password                |
+| `mqtt_topic_prefix`      | `homeassistant/sensor/sms_keenetic_gateway` | Topic prefix                 |
+| `sms_monitoring_enabled` | `true`                                      | Auto-detect incoming SMS     |
+| `sms_check_interval`     | `60`                                        | SMS check interval (seconds) |
 
 ### Advanced Settings
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `sms_cost_per_message` | `0.0` | Cost per SMS (set to 0 to disable cost tracking sensor) |
-| `auto_delete_read_sms` | `true` | Automatically delete SMS after reading |
+| Option                 | Default | Description                                             |
+|------------------------|---------|---------------------------------------------------------|
+| `sms_cost_per_message` | `0.0`   | Cost per SMS (set to 0 to disable cost tracking sensor) |
+| `auto_delete_read_sms` | `true`  | Automatically delete SMS from router after reading      |
 
-### Example Configuration
+### Finding Modem Interface Name
 
-```yaml
-# Recommended: Use stable device ID
-device_path: "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
-# Or simple path (may change on reconnect):
-# device_path: "/dev/ttyUSB0"
-
-pin: ""
-port: 5000
-ssl: false
-username: "admin"
-password: "your_secure_password"
-mqtt_enabled: true
-mqtt_host: "core-mosquitto"
-mqtt_port: 1883
-mqtt_username: ""
-mqtt_password: ""
-sms_monitoring_enabled: true
-sms_check_interval: 60
-```
+To find the correct interface name (`keenetic_modem_interface`):
+1. Log in to your Keenetic router web interface
+2. Go to **System Dashboard** -> **Internet**
+3. Click on your Mobile connection
+4. Look for the interface identifier (usually visible in the URL or status page, e.g., `UsbLte0`)
+5. Alternatively, use the CLI command: `show interface`
 
 ## 🏠 Home Assistant Integration
 
@@ -155,11 +130,10 @@ Enable MQTT in configuration and the add-on will automatically create:
 - 📱 **Phone Number** text input
 - 💬 **Message Text** text input
 - 🔘 **Send SMS** button
-- ⚡ **Send Flash SMS** button (urgent alerts - displays on screen without saving)
 
 All entities appear under device **"SMS Gateway"** in Home Assistant.
 
-![MQTT Device Overview](https://raw.githubusercontent.com/pavelve/home-assistant-addons/main/sms-gammu-gateway/images/mqtt-device.png)
+![MQTT Device Overview](https://raw.githubusercontent.com/dalapenko/sms-keenetic-gateway/main/images/mqtt-device.png)
 
 ### Method 2: RESTful Notify
 
@@ -178,24 +152,17 @@ notify:
     message_param_name: message
 ```
 
-![Actions Notify Example](https://raw.githubusercontent.com/pavelve/home-assistant-addons/main/sms-gammu-gateway/images/actions-notify.png)
+![Actions Notify Example](https://raw.githubusercontent.com/dalapenko/sms-keenetic-gateway/main/images/actions-notify.png)
 
 ### Method 3: Direct Service Calls
 
 Use in automations:
 
 ```yaml
-# Normal SMS
 service: mqtt.publish
 data:
-  topic: "homeassistant/sensor/sms_gateway/send"
+  topic: "homeassistant/sensor/sms_keenetic_gateway/send"
   payload: '{"number": "+420123456789", "text": "Alert!"}'
-
-# Flash SMS (displays on screen, not saved to inbox)
-service: mqtt.publish
-data:
-  topic: "homeassistant/sensor/sms_gateway/send"
-  payload: '{"number": "+420123456789", "text": "URGENT ALERT!", "flash": true}'
 ```
 
 ## 📝 Usage Examples
@@ -207,7 +174,7 @@ data:
 4. Click **Send SMS** button
 5. Message field auto-clears, number stays for next message
 
-**Note:** Messages are limited to 255 characters due to MQTT message size constraints. Longer messages will be automatically split into multiple SMS parts by the GSM modem.
+**Note:** Messages are limited to 255 characters due to MQTT message size constraints.
 
 ### Automation Example
 
@@ -219,7 +186,7 @@ automation:
       entity_id: binary_sensor.door
       to: 'on'
     action:
-      service: notify.sms_gateway
+      service: notify.sms_keenetic_gateway
       data:
         message: 'Door opened!'
         target: '+420123456789'
@@ -228,62 +195,46 @@ automation:
 ### REST API Examples
 
 ```bash
-# Normal SMS
 curl -X POST http://192.168.1.x:5000/sms \
   -H "Content-Type: application/json" \
   -u admin:password \
   -d '{"text": "Test SMS", "number": "+420123456789"}'
-
-# Flash SMS (urgent alert - displays on screen without saving)
-curl -X POST http://192.168.1.x:5000/sms \
-  -H "Content-Type: application/json" \
-  -u admin:password \
-  -d '{"text": "URGENT!", "number": "+420123456789", "flash": true}'
 ```
-
-**Flash SMS Notes:**
-- Flash SMS displays immediately on phone screen
-- Message is NOT saved to inbox
-- Ideal for urgent alerts and notifications
-- Not all phones/carriers support Flash SMS (fallback to normal SMS)
-- Some carriers may charge differently for Flash SMS
 
 ## 🔧 API Documentation
 
 ### Swagger UI
 Access full API documentation at: `http://your-ha-ip:5000/docs/`
 
-![Swagger UI Documentation](https://raw.githubusercontent.com/pavelve/home-assistant-addons/main/sms-gammu-gateway/images/swagger-ui.png)
+![Swagger UI Documentation](https://raw.githubusercontent.com/dalapenko/sms-keenetic-gateway/main/images/swagger-ui.png)
 
 ### Main Endpoints
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| POST | `/sms` | Send SMS | Yes |
-| GET | `/sms` | Get all SMS | Yes |
-| GET | `/sms/{id}` | Get specific SMS | Yes |
-| DELETE | `/sms/{id}` | Delete SMS | Yes |
-| GET | `/status/signal` | Signal strength | No |
-| GET | `/status/network` | Network info | No |
-| GET | `/status/reset` | Reset modem | No |
+| Method | Endpoint          | Description      | Auth |
+|--------|-------------------|------------------|------|
+| POST   | `/sms`            | Send SMS         | Yes  |
+| GET    | `/sms`            | Get all SMS      | Yes  |
+| GET    | `/sms/{id}`       | Get specific SMS | Yes  |
+| DELETE | `/sms/{id}`       | Delete SMS       | Yes  |
+| GET    | `/status/signal`  | Signal strength  | No   |
+| GET    | `/status/network` | Network info     | No   |
+| GET    | `/status/reset`   | Check connection | No   |
 
 ## 🚨 Troubleshooting
 
-### Device Not Found
-- Check USB connection: `ls /dev/ttyUSB*`
-- **Recommended:** Use stable device ID instead of `/dev/ttyUSB0`:
-  ```bash
-  ls -la /dev/serial/by-id/
-  ```
-- Verify device permissions
-- Try different USB ports
-- Check `dmesg | grep tty` for device detection
+### Authentication Errors
+- Verify router username and password
+- Check if you can log in to the router web interface
+- Ensure `keenetic_host` is correct and reachable
+
+### Connection Refused
+- Check network connectivity between HA and Router
+- Verify router firewall settings (RCI API access allowed)
 
 ### SMS Not Sending
 - Check signal strength (should be > 20%)
 - Verify SIM card has credit
-- Ensure PIN is correct or disabled
-- Check network registration status
+- Check network registration status in router interface
 
 ### MQTT Not Working
 - Verify MQTT broker is running
@@ -291,24 +242,18 @@ Access full API documentation at: `http://your-ha-ip:5000/docs/`
 - Look for connection errors in add-on logs
 - Ensure topic prefix doesn't conflict
 
-### Code 69 Error
-- This is SMSC (SMS Center) issue
-- Add-on automatically uses Location 1 fallback
-- Works same as REST API
-
 ## 📋 Version History
 
 See [CHANGELOG.md](./CHANGELOG.md) for detailed version history.
 
 ## 🤝 Support
 
-- **Issues**: [GitHub Issues](https://github.com/pavelve/home-assistant-addons/issues)
+- **Issues**: [GitHub Issues](https://github.com/dalapenko/sms-keenetic-gateway/issues)
 - **Documentation**: This page and Swagger UI at `/docs/`
-- **Source**: Based on [sms-gammu-gateway](https://github.com/pajikos/sms-gammu-gateway)
 
 ## 📜 License
 
-Based on pajikos/sms-gammu-gateway, licensed under Apache License 2.0.
+Licensed under Apache License 2.0.
 
 ---
 

@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-SMS Gammu Gateway - Home Assistant Add-on
-REST API SMS Gateway using python-gammu for USB GSM modems
-
-Based on: https://github.com/pajikos/sms-gammu-gateway
-Licensed under Apache License 2.0
+SMS Keenetic Gateway - Home Assistant Add-on
+REST API SMS Gateway using Keenetic Router API
 """
 
 import os
@@ -16,9 +13,10 @@ from flask import Flask, request
 from flask_httpauth import HTTPBasicAuth
 from flask_restx import Api, Resource, fields, reqparse
 
-from support import init_state_machine, retrieveAllSms, deleteSms, encodeSms
+# Import Keenetic support functions
+from support import init_keenetic_client, retrieveAllSms, delete_sms
+from keenetic_client import KeeneticAuthError, KeeneticConnectionError, KeeneticSMSError
 from mqtt_publisher import MQTTPublisher
-from gammu import GSMNetworks
 
 # Configure logging with timestamp
 logging.basicConfig(
@@ -88,8 +86,11 @@ def load_ha_config():
     else:
         # Default values for testing outside HA
         return {
-            'device_path': '/dev/ttyUSB0',
-            'pin': '',
+            'keenetic_host': '192.168.1.1',
+            'keenetic_username': 'admin',
+            'keenetic_password': '',
+            'keenetic_modem_interface': 'UsbLte0',
+            'keenetic_use_https': False,
             'port': 5000,
             'ssl': False,
             'username': 'admin',
@@ -99,7 +100,7 @@ def load_ha_config():
             'mqtt_port': 1883,
             'mqtt_username': '',
             'mqtt_password': '',
-            'mqtt_topic_prefix': 'homeassistant/sensor/sms_gateway',
+            'mqtt_topic_prefix': 'homeassistant/sensor/sms_keenetic_gateway',
             'sms_monitoring_enabled': True,
             'sms_check_interval': 60,
             'sms_cost_per_message': 0.0,
@@ -110,27 +111,42 @@ def load_ha_config():
 # Load version and configuration
 VERSION = load_version()
 config = load_ha_config()
-pin = config.get('pin') if config.get('pin') else None
+
+# Keenetic Config
+keenetic_host = config.get('keenetic_host', '192.168.1.1')
+keenetic_username = config.get('keenetic_username', 'admin')
+keenetic_password = config.get('keenetic_password', '')
+keenetic_interface = config.get('keenetic_modem_interface', 'UsbLte0')
+keenetic_use_https = config.get('keenetic_use_https', False)
+
 ssl = config.get('ssl', False)
 port = config.get('port', 5000)
 username = config.get('username', 'admin')
 password = config.get('password', 'password')
-device_path = config.get('device_path', '/dev/ttyUSB0')
 
-# Initialize MQTT publisher FIRST (before gammu)
+# Initialize MQTT publisher FIRST
 mqtt_publisher = MQTTPublisher(config)
 
-# Publish OFFLINE status immediately on startup (clears any stale "online" state)
+# Publish OFFLINE status immediately on startup
 if mqtt_publisher.connected:
     mqtt_publisher.device_tracker.initial_check_done = False  # Force offline
     mqtt_publisher.publish_device_status()
     logging.info("📡 Published initial OFFLINE status on startup")
 
-# Now initialize gammu state machine (this may fail if modem not connected)
-machine = init_state_machine(pin, device_path)
+# Initialize Keenetic Client
+try:
+    keenetic_client = init_keenetic_client(
+        keenetic_host, keenetic_username, keenetic_password, 
+        keenetic_interface, keenetic_use_https
+    )
+except Exception as e:
+    logging.error(f"Failed to initialize Keenetic client: {e}")
+    # We continue running so the API is available (maybe config is wrong and user will fix it)
+    keenetic_client = None
 
-# Set gammu machine for MQTT SMS sending
-mqtt_publisher.set_gammu_machine(machine)
+# Set client for MQTT SMS sending
+if keenetic_client:
+    mqtt_publisher.set_keenetic_client(keenetic_client)
 
 # Setup signal handlers for graceful shutdown
 def signal_handler(signum, frame):
@@ -174,7 +190,7 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>SMS Gammu Gateway</title>
+        <title>SMS Keenetic Gateway</title>
         <meta charset="utf-8">
         <style>
             body { 
@@ -230,7 +246,7 @@ def home():
     </head>
     <body>
         <div class="container">
-            <h1>📱 SMS Gammu Gateway</h1>
+            <h1>📱 SMS Keenetic Gateway</h1>
             
             <div class="status">
                 <strong>✅ Gateway is running properly</strong><br>
@@ -261,12 +277,11 @@ def home():
     return Response(html.replace('{VERSION}', VERSION), mimetype='text/html')
 
 # Swagger UI Configuration
-# Put Swagger UI on /docs/ path for direct access via port 5000
 api = Api(
     app,
     version=VERSION,
-    title='SMS Gammu Gateway API',
-    description='REST API for sending and receiving SMS messages via USB GSM modems (SIM800L, Huawei, etc.). Modern replacement for deprecated SMS notifications via GSM-modem integration.',
+    title='SMS Keenetic Gateway API',
+    description='REST API for sending and receiving SMS messages via Keenetic Router.',
     doc='/docs/',  # Swagger UI on /docs/ path
     prefix='',
     authorizations={
@@ -287,13 +302,10 @@ def verify(user, pwd):
         return False
     return user == username and pwd == password
 
-# API Models for Swagger documentation
+# API Models
 sms_model = api.model('SMS', {
     'text': fields.String(required=True, description='SMS message text', example='Hello, how are you?'),
     'number': fields.String(required=True, description='Phone number (international format)', example='+420123456789'),
-    'smsc': fields.String(required=False, description='SMS Center number (optional)', example='+420603052000'),
-    'unicode': fields.Boolean(required=False, description='Use Unicode encoding', default=False),
-    'flash': fields.Boolean(required=False, description='Send as Flash SMS (displays on screen, not saved)', default=False)
 })
 
 sms_response = api.model('SMS Response', {
@@ -306,25 +318,25 @@ sms_response = api.model('SMS Response', {
 signal_response = api.model('Signal Quality', {
     'SignalStrength': fields.Integer(description='Signal strength in dBm', example=-75),
     'SignalPercent': fields.Integer(description='Signal strength percentage', example=65),
-    'BitErrorRate': fields.Integer(description='Bit error rate', example=-1)
+    'BitErrorRate': fields.Integer(description='Bit error rate', example=0)
 })
 
 network_response = api.model('Network Info', {
     'NetworkName': fields.String(description='Network operator name', example='T-Mobile'),
-    'State': fields.String(description='Network registration state', example='HomeNetwork'),
-    'NetworkCode': fields.String(description='Network operator code', example='230 01'),
+    'State': fields.String(description='Network registration state', example='registered'),
+    'NetworkCode': fields.String(description='Network operator code', example='23001'),
     'CID': fields.String(description='Cell ID', example='0A1B2C3D'),
     'LAC': fields.String(description='Location Area Code', example='1234')
 })
 
 send_response = api.model('Send Response', {
     'status': fields.Integer(description='HTTP status code', example=200),
-    'message': fields.String(description='Response message', example='[1]')
+    'message': fields.String(description='Response message', example='Sent')
 })
 
 reset_response = api.model('Reset Response', {
     'status': fields.Integer(description='HTTP status code', example=200),
-    'message': fields.String(description='Reset message', example='Reset done')
+    'message': fields.String(description='Reset message', example='Connection check done')
 })
 
 modem_info_response = api.model('Modem Info', {
@@ -342,13 +354,18 @@ sms_capacity_response = api.model('SMS Capacity', {
     'SIMUsed': fields.Integer(description='SMS count in SIM memory', example=5),
     'SIMSize': fields.Integer(description='SIM total capacity', example=50),
     'PhoneUsed': fields.Integer(description='SMS count in phone memory', example=0),
-    'PhoneSize': fields.Integer(description='Phone memory capacity', example=100),
+    'PhoneSize': fields.Integer(description='Phone memory capacity', example=0),
     'TemplatesUsed': fields.Integer(description='SMS templates used', example=0)
 })
 
 # API Namespaces
 ns_sms = api.namespace('sms', description='SMS operations (requires authentication)')
 ns_status = api.namespace('status', description='Device status and information (public)')
+
+def check_client():
+    """Ensure client is initialized"""
+    if not keenetic_client:
+        api.abort(503, "Keenetic client not initialized - check configuration")
 
 @ns_sms.route('')
 @ns_sms.doc('sms_operations')
@@ -359,9 +376,17 @@ class SmsCollection(Resource):
     @auth.login_required
     def get(self):
         """Get all SMS messages from SIM/device memory"""
-        allSms = mqtt_publisher.track_gammu_operation("retrieveAllSms", retrieveAllSms, machine)
-        list(map(lambda sms: sms.pop("Locations", None), allSms))
-        return allSms
+        check_client()
+        try:
+            # We track "retrieveAllSms" which maps to client.get_all_sms()
+            all_sms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
+            # Remove internal fields before returning
+            list(map(lambda sms: sms.pop("Locations", None), all_sms))
+            list(map(lambda sms: sms.pop("index", None), all_sms))
+            list(map(lambda sms: sms.pop("original_index", None), all_sms))
+            return all_sms
+        except Exception as e:
+            api.abort(500, str(e))
 
     @ns_sms.doc('send_sms')
     @ns_sms.expect(sms_model)
@@ -370,85 +395,45 @@ class SmsCollection(Resource):
     @auth.login_required
     def post(self):
         """Send SMS message(s)"""
+        check_client()
         parser = reqparse.RequestParser()
         parser.add_argument('text', required=False, help='SMS message text')
         parser.add_argument('message', required=False, help='SMS message text (alias for text)')
         parser.add_argument('number', required=False, help='Phone number(s), comma separated')
         parser.add_argument('target', required=False, help='Phone number (alias for number)')
-        parser.add_argument('smsc', required=False, help='SMS Center number (optional)')
-        parser.add_argument('unicode', type=bool, required=False, default=False, help='Use Unicode encoding')
-        parser.add_argument('flash', type=bool, required=False, default=False, help='Send as Flash SMS')
         
         args = parser.parse_args()
         
-        # Support both 'text' and 'message' parameters
         sms_text = args.get('text') or args.get('message')
         if not sms_text:
             return {"status": 400, "message": "Missing required field: text or message"}, 400
         
-        # Support both 'number' and 'target' parameters
         sms_number = args.get('number') or args.get('target')
         if not sms_number:
             return {"status": 400, "message": "Missing required field: number or target"}, 400
 
-        # Determine SMS class based on flash parameter
-        sms_class = 0 if args.get('flash', False) else -1
-
-        smsinfo = {
-            "Class": sms_class,
-            "Unicode": args.get('unicode', False),
-            "Entries": [
-                {
-                    "ID": "ConcatenatedTextLong",
-                    "Buffer": sms_text,
-                }
-            ],
-        }
-        messages = []
-        for number in sms_number.split(','):
-            for message in encodeSms(smsinfo):
-                message["SMSC"] = {'Number': args.get("smsc")} if args.get("smsc") else {'Location': 1}
-                message["Number"] = number.strip()
-                messages.append(message)
-
+        # Send to multiple recipients
+        numbers = [n.strip() for n in sms_number.split(',') if n.strip()]
+        
         try:
-            result = [mqtt_publisher.track_gammu_operation("SendSMS", machine.SendSMS, message) for message in messages]
-
-            # Increment SMS counter for each sent message
-            for _ in messages:
+            results = []
+            for num in numbers:
+                # Use track_client_operation to handle errors and stats
+                res = mqtt_publisher.track_client_operation("SendSMS", keenetic_client.send_sms, num, sms_text)
+                results.append(res)
+                
+                # Increment counter
                 mqtt_publisher.sms_counter.increment()
+            
             mqtt_publisher.publish_sms_counter()
+            return {"status": 200, "message": f"Sent to {len(numbers)} recipients"}, 200
 
-            return {"status": 200, "message": str(result)}, 200
-
-        except TimeoutError as e:
-            # Modem timeout - service unavailable
-            api.abort(503, f"Modem timeout: {str(e)}")
-
+        except KeeneticConnectionError as e:
+            api.abort(503, f"Connection to router failed: {str(e)}")
+        except KeeneticSMSError as e:
+            api.abort(500, f"SMS Send failed: {str(e)}")
         except Exception as e:
-            # Try to extract Gammu error details if available
-            error_msg = str(e)
-
-            # Parse Gammu error codes for user-friendly messages
-            # Based on existing error handling pattern in mqtt_publisher.py
-            if "Code': 49" in error_msg:
-                # Can't access SIM card
-                api.abort(503, "Cannot access SIM card - check SIM card status")
-            elif "Code': 37" in error_msg:
-                # ERR_BUG - protocol implementation error
-                api.abort(503, "Modem protocol error - try again or restart modem")
-            elif "Code': 27" in error_msg:
-                # SMS sending failed
-                api.abort(503, "SMS sending failed - check SIM card, network signal or device connection")
-            elif "Code': 38" in error_msg:
-                # Network registration failed
-                api.abort(503, "Network registration failed - check SIM card and signal")
-            elif "Code': 69" in error_msg:
-                # SMSC number not found
-                api.abort(503, "SMSC number not found - configure SMS center number in SIM settings")
-            else:
-                # Generic modem error
-                api.abort(503, f"Failed to send SMS: {error_msg}")
+            api.abort(500, f"Error: {str(e)}")
 
 @ns_sms.route('/<int:id>')
 @ns_sms.doc('sms_by_id')
@@ -458,8 +443,9 @@ class SmsItem(Resource):
     @ns_sms.doc(security='basicAuth')
     @auth.login_required
     def get(self, id):
-        """Get specific SMS by ID"""
-        allSms = mqtt_publisher.track_gammu_operation("retrieveAllSms", retrieveAllSms, machine)
+        """Get specific SMS by ID (index in list)"""
+        check_client()
+        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
         if id < 0 or id >= len(allSms):
             api.abort(404, f"SMS with id '{id}' not found")
         sms = allSms[id]
@@ -470,11 +456,12 @@ class SmsItem(Resource):
     @ns_sms.doc(security='basicAuth')
     @auth.login_required
     def delete(self, id):
-        """Delete SMS by ID"""
-        allSms = mqtt_publisher.track_gammu_operation("retrieveAllSms", retrieveAllSms, machine)
+        """Delete SMS by ID (index in list)"""
+        check_client()
+        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
         if id < 0 or id >= len(allSms):
             api.abort(404, f"SMS with id '{id}' not found")
-        mqtt_publisher.track_gammu_operation("deleteSms", deleteSms, machine, allSms[id])
+        mqtt_publisher.track_client_operation("deleteSms", delete_sms, keenetic_client, allSms[id])
         return '', 204
 
 @ns_sms.route('/getsms')
@@ -486,13 +473,13 @@ class GetSms(Resource):
     @auth.login_required
     def get(self):
         """Get first SMS and delete it from memory"""
-        allSms = mqtt_publisher.track_gammu_operation("retrieveAllSms", retrieveAllSms, machine)
+        check_client()
+        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
         sms = {"Date": "", "Number": "", "State": "", "Text": ""}
         if len(allSms) > 0:
             sms = allSms[0]
-            mqtt_publisher.track_gammu_operation("deleteSms", deleteSms, machine, sms)
+            mqtt_publisher.track_client_operation("deleteSms", delete_sms, keenetic_client, sms)
             sms.pop("Locations", None)
-            # Publish to MQTT if enabled and SMS has content
             if sms.get("Text"):
                 mqtt_publisher.publish_sms_received(sms)
         return sms
@@ -504,11 +491,9 @@ class DeleteAllSms(Resource):
     @ns_sms.doc(security='basicAuth')
     @auth.login_required
     def delete(self):
-        """Delete all SMS messages from SIM/device memory"""
-        allSms = mqtt_publisher.track_gammu_operation("retrieveAllSms", retrieveAllSms, machine)
-        count = len(allSms)
-        for sms in allSms:
-            mqtt_publisher.track_gammu_operation("deleteSms", deleteSms, machine, sms)
+        """Delete all SMS messages"""
+        check_client()
+        count = mqtt_publisher.track_client_operation("deleteAllSms", keenetic_client.delete_all_sms)
         return {"status": 200, "message": f"Deleted {count} SMS messages"}, 200
 
 @ns_status.route('/signal')
@@ -517,9 +502,9 @@ class Signal(Resource):
     @ns_status.doc('signal_strength')
     @ns_status.marshal_with(signal_response)
     def get(self):
-        """Get GSM signal strength and quality"""
-        signal_data = mqtt_publisher.track_gammu_operation("GetSignalQuality", machine.GetSignalQuality)
-        # Publish to MQTT if enabled
+        """Get GSM signal strength"""
+        check_client()
+        signal_data = mqtt_publisher.track_client_operation("GetSignalQuality", keenetic_client.get_signal_quality)
         mqtt_publisher.publish_signal_strength(signal_data)
         return signal_data
 
@@ -529,10 +514,9 @@ class Network(Resource):
     @ns_status.doc('network_information')
     @ns_status.marshal_with(network_response)
     def get(self):
-        """Get network operator and registration information"""
-        network = mqtt_publisher.track_gammu_operation("GetNetworkInfo", machine.GetNetworkInfo)
-        network["NetworkName"] = GSMNetworks.get(network.get("NetworkCode", ""), 'Unknown')
-        # Publish to MQTT if enabled
+        """Get network info"""
+        check_client()
+        network = mqtt_publisher.track_client_operation("GetNetworkInfo", keenetic_client.get_network_info)
         mqtt_publisher.publish_network_info(network)
         return network
 
@@ -542,24 +526,11 @@ class ModemInfo(Resource):
     @ns_status.doc('modem_information')
     @ns_status.marshal_with(modem_info_response)
     def get(self):
-        """Get modem hardware information (IMEI, manufacturer, model, firmware)"""
-        try:
-            modem_info = {
-                "IMEI": mqtt_publisher.track_gammu_operation("GetIMEI", machine.GetIMEI),
-                "Manufacturer": mqtt_publisher.track_gammu_operation("GetManufacturer", machine.GetManufacturer),
-                "Model": mqtt_publisher.track_gammu_operation("GetModel", machine.GetModel)
-            }
-            try:
-                # Firmware can fail on some modems
-                modem_info["Firmware"] = mqtt_publisher.track_gammu_operation("GetFirmware", machine.GetFirmware)[0]
-            except:
-                modem_info["Firmware"] = "Unknown"
-
-            # Publish to MQTT if enabled
-            mqtt_publisher.publish_modem_info(modem_info)
-            return modem_info
-        except Exception as e:
-            api.abort(500, f"Failed to get modem info: {str(e)}")
+        """Get modem info"""
+        check_client()
+        modem_info = mqtt_publisher.track_client_operation("GetModemInfo", keenetic_client.get_modem_info)
+        mqtt_publisher.publish_modem_info(modem_info)
+        return modem_info
 
 @ns_status.route('/sim')
 @ns_status.doc('get_sim_info')
@@ -567,16 +538,11 @@ class SimInfo(Resource):
     @ns_status.doc('sim_information')
     @ns_status.marshal_with(sim_info_response)
     def get(self):
-        """Get SIM card information (IMSI)"""
-        try:
-            sim_info = {
-                "IMSI": mqtt_publisher.track_gammu_operation("GetSIMIMSI", machine.GetSIMIMSI)
-            }
-            # Publish to MQTT if enabled
-            mqtt_publisher.publish_sim_info(sim_info)
-            return sim_info
-        except Exception as e:
-            api.abort(500, f"Failed to get SIM info: {str(e)}")
+        """Get SIM info (IMSI)"""
+        check_client()
+        sim_info = {"IMSI": mqtt_publisher.track_client_operation("GetIMSI", keenetic_client.get_sim_imsi)}
+        mqtt_publisher.publish_sim_info(sim_info)
+        return sim_info
 
 @ns_status.route('/sms_capacity')
 @ns_status.doc('get_sms_capacity')
@@ -584,14 +550,11 @@ class SmsCapacity(Resource):
     @ns_status.doc('sms_storage_capacity')
     @ns_status.marshal_with(sms_capacity_response)
     def get(self):
-        """Get SMS storage capacity and usage"""
-        try:
-            capacity = mqtt_publisher.track_gammu_operation("GetSMSStatus", machine.GetSMSStatus)
-            # Publish to MQTT if enabled
-            mqtt_publisher.publish_sms_capacity(capacity)
-            return capacity
-        except Exception as e:
-            api.abort(500, f"Failed to get SMS capacity: {str(e)}")
+        """Get SMS capacity"""
+        check_client()
+        capacity = mqtt_publisher.track_client_operation("GetSMSCapacity", keenetic_client.get_sms_capacity)
+        mqtt_publisher.publish_sms_capacity(capacity)
+        return capacity
 
 @ns_status.route('/reset')
 @ns_status.doc('reset_modem')
@@ -599,41 +562,42 @@ class Reset(Resource):
     @ns_status.doc('modem_reset')
     @ns_status.marshal_with(reset_response)
     def get(self):
-        """Reset GSM modem (useful for stuck connections)"""
-        mqtt_publisher.track_gammu_operation("Reset", machine.Reset, False)
-        return {"status": 200, "message": "Reset done"}, 200
+        """Check connection / Refresh session"""
+        check_client()
+        # Just check connection
+        status = mqtt_publisher.track_client_operation("CheckConnection", keenetic_client.check_connection)
+        return {"status": 200, "message": f"Connection active: {status}"}, 200
 
 if __name__ == '__main__':
-    print(f"🚀 SMS Gammu Gateway v{VERSION} started successfully!")
-    print(f"📱 Device: {device_path}")
+    print(f"🚀 SMS Keenetic Gateway v{VERSION} started successfully!")
     print(f"🌐 API available on port {port}")
     print(f"🏠 Web UI: http://localhost:{port}/")
-    print(f"🔒 SSL: {'Enabled' if ssl else 'Disabled'}")
+    print(f"📡 Keenetic Host: {keenetic_host}")
     
     # MQTT info
     if config.get('mqtt_enabled', False):
         print(f"📡 MQTT: Enabled -> {config.get('mqtt_host')}:{config.get('mqtt_port')}")
         
-        # Wait a moment for MQTT connection, then publish initial states
+        # Wait a moment for MQTT connection
         import time
         time.sleep(2)
-        mqtt_publisher.publish_initial_states_with_machine(machine)
         
-        # Start periodic MQTT publishing
-        mqtt_publisher.publish_status_periodic(machine, interval=300)  # 5 minutes
-        
-        # Start SMS monitoring if enabled
-        if config.get('sms_monitoring_enabled', True):
-            check_interval = config.get('sms_check_interval', 60)
-            mqtt_publisher.start_sms_monitoring(machine, check_interval=check_interval)
-            print(f"📱 SMS Monitoring: Enabled (check every {check_interval}s)")
-        else:
-            print(f"📱 SMS Monitoring: Disabled")
+        if keenetic_client:
+            mqtt_publisher.publish_initial_states_with_client(keenetic_client)
+            
+            # Start periodic MQTT publishing
+            mqtt_publisher.publish_status_periodic(keenetic_client, interval=300)
+            
+            # Start SMS monitoring if enabled
+            if config.get('sms_monitoring_enabled', True):
+                check_interval = config.get('sms_check_interval', 60)
+                mqtt_publisher.start_sms_monitoring(keenetic_client, check_interval=check_interval)
+                print(f"📱 SMS Monitoring: Enabled (check every {check_interval}s)")
+            else:
+                print(f"📱 SMS Monitoring: Disabled")
     else:
         print(f"📡 MQTT: Disabled")
     
-    print(f"✅ Ready to send/receive SMS messages")
-
     try:
         if ssl:
             app.run(port=port, host="0.0.0.0", ssl_context=('/ssl/cert.pem', '/ssl/key.pem'),
