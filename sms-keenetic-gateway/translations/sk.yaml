@@ -1,10 +1,19 @@
 configuration:
-  device_path:
-    name: Cesta k zariadeniu
-    description: Cesta k vášmu GSM modemu (napr. /dev/ttyUSB0)
-  pin:
-    name: PIN SIM karty
-    description: PIN kód SIM karty (nechajte prázdne, ak PIN nie je potrebný)
+  keenetic_host:
+    name: Keenetic Hostiteľ
+    description: IP adresa alebo názov hostiteľa smerovača Keenetic (napr. 192.168.1.1)
+  keenetic_username:
+    name: Používateľské Meno
+    description: Admin užívateľské meno pre Keenetic router (zvyčajne 'admin')
+  keenetic_password:
+    name: Keenetické Heslo
+    description: Heslo pre používateľa správcu smerovača Keenetic
+  keenetic_modem_interface:
+    name: Rozhranie Modemu
+    description: Názov rozhrania USB modemu (napr. UsbLte0, UsbLte1)
+  keenetic_use_https:
+    name: Použite HTTPS pre Keenetic
+    description: "Na komunikáciu smerovača použite zabezpečené pripojenie HTTPS (predvolené: false)"
   port:
     name: Port API
     description: Port pre REST API SMS Gateway

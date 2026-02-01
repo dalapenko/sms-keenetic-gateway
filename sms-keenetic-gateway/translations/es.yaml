@@ -1,10 +1,19 @@
 configuration:
-  device_path:
-    name: Ruta del dispositivo
-    description: Ruta a su módem GSM (por ejemplo /dev/ttyUSB0)
-  pin:
-    name: PIN SIM
-    description: Código PIN de la tarjeta SIM (dejar vacío si no se requiere PIN)
+  keenetic_host:
+    name: Anfitrión Keenético
+    description: Dirección IP o nombre de host del enrutador Keenetic (por ejemplo, 192.168.1.1)
+  keenetic_username:
+    name: Nombre de Usuario Keenetic
+    description: Nombre de usuario de administrador para el enrutador Keenetic (generalmente 'admin')
+  keenetic_password:
+    name: Contraseña Keenetic
+    description: Contraseña para el usuario administrador del enrutador Keenetic
+  keenetic_modem_interface:
+    name: Interfaz de Módem
+    description: Nombre de la interfaz del módem USB (por ejemplo, UsbLte0, UsbLte1)
+  keenetic_use_https:
+    name: Use HTTPS para Keenetic
+    description: "Utilice una conexión HTTPS segura para la comunicación del enrutador (predeterminado: false)"
   port:
     name: Puerto API
     description: Puerto para la API REST de la puerta de enlace SMS

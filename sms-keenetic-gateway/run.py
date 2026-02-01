@@ -9,13 +9,13 @@ import json
 import logging
 import signal
 import sys
-from flask import Flask, request
+from flask import Flask
 from flask_httpauth import HTTPBasicAuth
 from flask_restx import Api, Resource, fields, reqparse
 
 # Import Keenetic support functions
-from support import init_keenetic_client, retrieveAllSms, delete_sms
-from keenetic_client import KeeneticAuthError, KeeneticConnectionError, KeeneticSMSError
+from support import init_keenetic_client, retrieve_all_sms, delete_sms
+from keenetic_client import KeeneticConnectionError, KeeneticSMSError
 from mqtt_publisher import MQTTPublisher
 
 # Configure logging with timestamp
@@ -24,8 +24,6 @@ logging.basicConfig(
     format='[%(asctime)s] %(levelname)s: %(message)s',
     datefmt='%H:%M:%S'
 )
-mqtt_logger = logging.getLogger('mqtt_publisher')
-mqtt_logger.setLevel(logging.INFO)
 
 # Suppress Flask development server warnings
 log = logging.getLogger('werkzeug')
@@ -96,7 +94,7 @@ def load_ha_config():
             'username': 'admin',
             'password': 'password',
             'mqtt_enabled': True,
-            'mqtt_host': 'localhost',
+            'mqtt_host': 'core-mosquitto',
             'mqtt_port': 1883,
             'mqtt_username': '',
             'mqtt_password': '',
@@ -104,7 +102,7 @@ def load_ha_config():
             'sms_monitoring_enabled': True,
             'sms_check_interval': 60,
             'sms_cost_per_message': 0.0,
-            'sms_cost_currency': 'CZK',
+            'sms_cost_currency': 'USD',
             'auto_delete_read_sms': False
         }
 
@@ -176,10 +174,6 @@ def cleanup():
 atexit.register(cleanup)
 
 app = Flask(__name__)
-
-# Check if running under Ingress
-import os
-ingress_path = os.environ.get('INGRESS_PATH', '')
 
 # Create simple HTML page for Ingress
 @app.route('/')
@@ -379,7 +373,7 @@ class SmsCollection(Resource):
         check_client()
         try:
             # We track "retrieveAllSms" which maps to client.get_all_sms()
-            all_sms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
+            all_sms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieve_all_sms, keenetic_client)
             # Remove internal fields before returning
             list(map(lambda sms: sms.pop("Locations", None), all_sms))
             list(map(lambda sms: sms.pop("index", None), all_sms))
@@ -416,11 +410,9 @@ class SmsCollection(Resource):
         numbers = [n.strip() for n in sms_number.split(',') if n.strip()]
         
         try:
-            results = []
             for num in numbers:
                 # Use track_client_operation to handle errors and stats
-                res = mqtt_publisher.track_client_operation("SendSMS", keenetic_client.send_sms, num, sms_text)
-                results.append(res)
+                mqtt_publisher.track_client_operation("SendSMS", keenetic_client.send_sms, num, sms_text)
                 
                 # Increment counter
                 mqtt_publisher.sms_counter.increment()
@@ -445,7 +437,7 @@ class SmsItem(Resource):
     def get(self, id):
         """Get specific SMS by ID (index in list)"""
         check_client()
-        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
+        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieve_all_sms, keenetic_client)
         if id < 0 or id >= len(allSms):
             api.abort(404, f"SMS with id '{id}' not found")
         sms = allSms[id]
@@ -458,7 +450,7 @@ class SmsItem(Resource):
     def delete(self, id):
         """Delete SMS by ID (index in list)"""
         check_client()
-        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
+        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieve_all_sms, keenetic_client)
         if id < 0 or id >= len(allSms):
             api.abort(404, f"SMS with id '{id}' not found")
         mqtt_publisher.track_client_operation("deleteSms", delete_sms, keenetic_client, allSms[id])
@@ -474,7 +466,7 @@ class GetSms(Resource):
     def get(self):
         """Get first SMS and delete it from memory"""
         check_client()
-        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieveAllSms, keenetic_client)
+        allSms = mqtt_publisher.track_client_operation("retrieveAllSms", retrieve_all_sms, keenetic_client)
         sms = {"Date": "", "Number": "", "State": "", "Text": ""}
         if len(allSms) > 0:
             sms = allSms[0]

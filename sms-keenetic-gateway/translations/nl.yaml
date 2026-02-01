@@ -1,10 +1,19 @@
 configuration:
-  device_path:
-    name: Apparaatpad
-    description: Pad naar uw GSM-modem (bijv. /dev/ttyUSB0)
-  pin:
-    name: SIM PIN-code
-    description: PIN-code van SIM-kaart (leeg laten als geen PIN vereist)
+  keenetic_host:
+    name: Keenetic Host
+    description: IP-adres of hostnaam van de Keenetic router (bijv. 192.168.1.1)
+  keenetic_username:
+    name: Keenetic Gebruikersnaam
+    description: Admin gebruikersnaam voor Keenetic router (meestal 'admin')
+  keenetic_password:
+    name: Keenetic Wachtwoord
+    description: Wachtwoord voor de beheerder van de Keenetic router
+  keenetic_modem_interface:
+    name: Modem Interface
+    description: Interfacenaam van de USB-modem (bijv. UsbLte0, UsbLte1)
+  keenetic_use_https:
+    name: Gebruik HTTPS voor Keenetic
+    description: "Beveiligde HTTPS-verbinding gebruiken voor routercommunicatie (standaard: false)"
   port:
     name: API-poort
     description: Poort voor de SMS Gateway REST API

@@ -545,7 +545,7 @@ class MQTTPublisher:
         # Add cost sensor if needed
         sms_cost_per_message = self.config.get('sms_cost_per_message', 0.0)
         if sms_cost_per_message > 0:
-            sms_cost_currency = self.config.get('sms_cost_currency', 'CZK')
+            sms_cost_currency = self.config.get('sms_cost_currency', 'USD')
             discoveries.append(("sensor/sms_keenetic_gateway_total_cost/config", {
                 "name": "SMS Total Cost", "unique_id": "sms_keenetic_gateway_total_cost",
                 "state_topic": f"{self.topic_prefix}/sms_counter/state",
@@ -663,9 +663,9 @@ class MQTTPublisher:
             last_processed_sms_time = ""
 
             while self.connected and not self.disconnecting:
-                from support import retrieveAllSms, delete_sms
+                from support import retrieve_all_sms, delete_sms
                 try:
-                    all_sms = self.track_client_operation("retrieveAllSms", retrieveAllSms, client)
+                    all_sms = self.track_client_operation("retrieveAllSms", retrieve_all_sms, client)
                     
                     if all_sms:
                         # Filter valid SMS and sort by date descending (newest first)

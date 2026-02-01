@@ -34,8 +34,6 @@ class KeeneticClient:
         self.base_url = f"{self.protocol}://{host}"
         self.session = requests.Session()
         self.authenticated = False
-        self.auth_cookies = None
-        self.last_sms_metadata = {}
         
         # Configure session with retries
         try:
@@ -95,7 +93,6 @@ class KeeneticClient:
             if response.status_code == 200:
                 self.session = temp_session
                 self.authenticated = True
-                self.auth_cookies = self.session.cookies
                 logger.info("Successfully authenticated with Keenetic router")
                 return True
             else:
@@ -240,12 +237,7 @@ class KeeneticClient:
                     # Case 1: "messages" is a dictionary (The structure seen in logs)
                     # "messages": {"nv-2": {...}, "nv-34": {...}}
                     # Also capture metadata if present (capacity info)
-                    self.last_sms_metadata = {}
                     if isinstance(sms_data, dict):
-                        for k, v in sms_data.items():
-                            if k.endswith('-slots') or k.endswith('-count'):
-                                self.last_sms_metadata[k] = v
-
                         messages_container = sms_data.get("messages")
                         if isinstance(messages_container, dict):
                             parsed_messages = []

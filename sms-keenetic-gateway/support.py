@@ -34,7 +34,7 @@ def init_keenetic_client(host, username, password, modem_interface='UsbLte0', us
         # Re-raise so main app knows initialization failed
         raise
 
-def retrieveAllSms(client):
+def retrieve_all_sms(client):
     """Retrieve all SMS messages from Keenetic modem"""
     try:
         raw_sms_list = client.get_all_sms()
