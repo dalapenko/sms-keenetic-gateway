@@ -41,25 +41,33 @@ def retrieveAllSms(client):
         results = []
         
         for sms in raw_sms_list:
+            if not isinstance(sms, dict):
+                logger.warning(f"Skipping invalid SMS item: {sms}")
+                continue
+                
             # Handle state mapping
-            # Keenetic typically uses lowercase 'read'/'unread'
-            state = sms.get('status', 'read')
-            if state == 'unread':
-                state = 'UnRead'
-            elif state == 'read':
-                state = 'Read'
+            # Check for boolean 'read' field (Keenetic NDMS style)
+            is_read = sms.get('read')
+            if isinstance(is_read, bool):
+                state = 'Read' if is_read else 'UnRead'
             else:
-                state = state.capitalize()
+                # Fallback to status string
+                state = sms.get('status', 'read')
+                if state == 'unread':
+                    state = 'UnRead'
+                elif state == 'read':
+                    state = 'Read'
+                else:
+                    state = state.capitalize()
                 
             result = {
                 "Date": sms.get('timestamp', ''),
-                "Number": sms.get('number', 'Unknown'),
+                "Number": sms.get('from') or sms.get('number', 'Unknown'),
                 "State": state,
                 "Text": sms.get('text', ''),
-                # Compatibility with existing format: Locations is a list of IDs
-                "Locations": [sms.get('index')],
-                # Additional fields preserved if needed
-                "original_index": sms.get('index')
+                # Use the ID we injected or fallback to index
+                "Locations": [sms.get('id') or sms.get('index')],
+                "original_index": sms.get('id') or sms.get('index')
             }
             results.append(result)
             

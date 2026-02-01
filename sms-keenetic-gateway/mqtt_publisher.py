@@ -623,6 +623,7 @@ class MQTTPublisher:
             self.client.publish(f"{self.topic_prefix}/phone_number/state", "", retain=True, qos=1)
             self.client.publish(f"{self.topic_prefix}/message_text/state", "", retain=True, qos=1)
             self.client.publish(f"{self.topic_prefix}/send_status", json.dumps({"status": "ready"}), retain=False)
+            self.client.publish(f"{self.topic_prefix}/delete_sms_status", json.dumps({"status": "idle"}), retain=True)
 
     def publish_initial_states_with_client(self, client):
         if not self.connected: return
@@ -659,38 +660,33 @@ class MQTTPublisher:
         def _sms_monitor_loop():
             logger.info(f"📱 Started SMS monitoring (check every {check_interval}s)")
             
-            # Initial: Get all SMS
-            try:
-                from support import retrieveAllSms
-                initial_sms = self.track_client_operation("retrieveAllSms", retrieveAllSms, client)
-                last_sms_count = len(initial_sms)
-                logger.info(f"Initial SMS count: {last_sms_count}")
-            except Exception as e:
-                logger.warning(f"Initial SMS check failed: {e}")
-                last_sms_count = 0
+            last_processed_sms_time = ""
 
             while self.connected and not self.disconnecting:
                 from support import retrieveAllSms, delete_sms
                 try:
                     all_sms = self.track_client_operation("retrieveAllSms", retrieveAllSms, client)
-                    current_count = len(all_sms)
                     
-                    if current_count > last_sms_count:
-                        logger.info(f"New SMS detected: {current_count - last_sms_count}")
-                        # Process new messages (newest are likely at end or we check all)
-                        # We should ideally check IDs or keep track of seen IDs
-                        # But simple count check is what old code did (roughly)
+                    if all_sms:
+                        # Filter valid SMS and sort by date descending (newest first)
+                        valid_sms = [s for s in all_sms if isinstance(s, dict) and s.get('Date')]
+                        valid_sms.sort(key=lambda x: x.get('Date', ''), reverse=True)
                         
-                        # Better approach: check for 'UnRead' status
-                        for sms in all_sms:
-                            if sms.get('State') == 'UnRead':
-                                self.publish_sms_received(sms)
-                                
-                                if self.config.get('auto_delete_read_sms', False):
+                        if valid_sms:
+                            newest_sms = valid_sms[0]
+                            # Publish the most recent SMS (retain=True so it sticks)
+                            # Only publish if it's different/newer than what we last saw to reduce traffic
+                            if newest_sms.get('Date') != last_processed_sms_time:
+                                self.publish_sms_received(newest_sms)
+                                last_processed_sms_time = newest_sms.get('Date')
+                                logger.info(f"Updated Last SMS sensor: {newest_sms.get('Date')} from {newest_sms.get('Number')}")
+
+                            # Process Read messages for auto-delete
+                            for sms in valid_sms:
+                                if sms.get('State') == 'Read' and self.config.get('auto_delete_read_sms', False):
                                     self.track_client_operation("deleteSms", delete_sms, client, sms)
                                     logger.info(f"Auto-deleted SMS from {sms.get('Number')}")
-                        
-                    last_sms_count = current_count
+                    
                 except Exception as e:
                     logger.warning(f"SMS monitoring error: {e}")
                 

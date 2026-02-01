@@ -1,13 +1,13 @@
 {
   "name": "SMS Keenetic Gateway",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "slug": "sms_keenetic_gateway",
   "description": "REST API SMS Gateway using Keenetic Router API. Modern replacement for direct USB modem integration.",
   "startup": "services",
   "arch": ["amd64", "i386", "aarch64", "armv7", "armhf"],
   "boot": "auto",
   "panel_icon": "mdi:router-wireless",
-  "url": "https://github.com/dalapenko/sms-keenetic-gateway/blob/main/README.md",
+  "url": "https://github.com/dalapenko/sms-keenetic-gateway/blob/main/sms-keenetic-gateway/README.md",
   "options": {
     "keenetic_host": "192.168.1.1",
     "keenetic_username": "admin",

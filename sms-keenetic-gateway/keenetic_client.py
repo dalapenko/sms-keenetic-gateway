@@ -35,6 +35,7 @@ class KeeneticClient:
         self.session = requests.Session()
         self.authenticated = False
         self.auth_cookies = None
+        self.last_sms_metadata = {}
         
         # Configure session with retries
         try:
@@ -45,12 +46,11 @@ class KeeneticClient:
             pass
     
     def authenticate(self) -> bool:
-        """Perform challenge-response authentication"""
+        """Perform challenge-response authentication (NDMS style)"""
         try:
             # Step 1: Get challenge (401 Unauthorized expected)
             auth_url = f"{self.base_url}/auth"
             try:
-                # Use a new session for fresh authentication flow
                 temp_session = requests.Session()
                 response = temp_session.get(auth_url, timeout=10)
             except requests.RequestException as e:
@@ -58,28 +58,31 @@ class KeeneticClient:
                 raise KeeneticConnectionError(f"Could not connect to {self.base_url}")
 
             if response.status_code != 401:
-                # If we get 200, we might be already authenticated or no auth required
                 if response.status_code == 200:
-                    logger.info("Authentication endpoint returned 200, assuming no auth or already logged in")
+                    logger.info("Authentication endpoint returned 200, assuming already logged in")
                     self.session = temp_session
                     self.authenticated = True
                     return True
-                logger.error(f"Unexpected status code from auth endpoint: {response.status_code}")
+                logger.error(f"Unexpected status code: {response.status_code}")
+                return False
+            
+            # Strict check for X-NDM headers as requested
+            challenge = response.headers.get('X-NDM-Challenge')
+            realm = response.headers.get('X-NDM-Realm')
+            
+            if not challenge or not realm:
+                logger.error(f"Missing X-NDM headers. Status: {response.status_code}")
+                logger.debug(f"Headers: {dict(response.headers)}")
                 return False
                 
-            challenge = response.headers.get('X-KNDS-Challenge') or response.headers.get('X-Keenetic-Challenge')
+            # Step 2: Calculate hash (MD5 + SHA256)
+            # MD5(login:realm:pass)
+            md5_str = f"{self.username}:{realm}:{self.password}"
+            md5_hash = hashlib.md5(md5_str.encode('utf-8')).hexdigest()
             
-            if not challenge:
-                logger.error("No challenge header found in 401 response")
-                return False
-                
-            # Step 2: Calculate hash
-            # According to common Keenetic API docs:
-            # hash = SHA256(challenge + SHA256(password))
-            
-            password_hash = hashlib.sha256(self.password.encode('utf-8')).hexdigest()
-            auth_string = f"{challenge}{password_hash}"
-            response_hash = hashlib.sha256(auth_string.encode('utf-8')).hexdigest()
+            # SHA256(challenge + md5_hash)
+            auth_str = f"{challenge}{md5_hash}"
+            response_hash = hashlib.sha256(auth_str.encode('utf-8')).hexdigest()
             
             # Step 3: POST login
             login_data = {
@@ -96,14 +99,13 @@ class KeeneticClient:
                 logger.info("Successfully authenticated with Keenetic router")
                 return True
             else:
-                logger.error(f"Authentication failed with status {response.status_code}: {response.text}")
+                logger.error(f"Authentication failed: {response.status_code} {response.text}")
                 return False
                 
         except Exception as e:
             logger.error(f"Authentication error: {e}")
             self.authenticated = False
             raise KeeneticConnectionError(f"Authentication process failed: {e}")
-
     def _ensure_authenticated(self):
         """Ensure we have a valid session, re-authenticating if necessary"""
         if not self.authenticated:
@@ -212,9 +214,6 @@ class KeeneticClient:
 
     def get_all_sms(self) -> List[Dict]:
         """Retrieve all SMS from modem using command structure"""
-        # Command: sms list interface <modem>? OR show interface <modem> sms-list?
-        # User observed: [{"sms":{"list":{"interface":"UsbLte0"}}}]
-        
         command = {
             "sms": {
                 "list": {
@@ -226,37 +225,47 @@ class KeeneticClient:
         try:
             result = self.send_command([command])
             
-            # Expected result format:
-            # [{"sms": {"list": {"interface": "...", "messages": [...]}}}]
-            # OR direct list of messages?
-            
             if result and isinstance(result, list) and len(result) > 0:
                 response_data = result[0]
                 
-                # Check directly for list of messages if structure is flat
-                if isinstance(response_data, list):
-                    return response_data
+                # Navigate through the structure
+                sms_data = None
+                if isinstance(response_data, dict):
+                    if "sms" in response_data and "list" in response_data["sms"]:
+                        sms_data = response_data["sms"]["list"]
+                    elif "messages" in response_data:
+                        sms_data = response_data
                 
-                # Check nested structure
-                if "sms" in response_data and "list" in response_data["sms"]:
-                    sms_data = response_data["sms"]["list"]
-                    # If sms_data is the list itself
+                if sms_data:
+                    # Case 1: "messages" is a dictionary (The structure seen in logs)
+                    # "messages": {"nv-2": {...}, "nv-34": {...}}
+                    # Also capture metadata if present (capacity info)
+                    self.last_sms_metadata = {}
+                    if isinstance(sms_data, dict):
+                        for k, v in sms_data.items():
+                            if k.endswith('-slots') or k.endswith('-count'):
+                                self.last_sms_metadata[k] = v
+
+                        messages_container = sms_data.get("messages")
+                        if isinstance(messages_container, dict):
+                            parsed_messages = []
+                            for msg_id, msg_content in messages_container.items():
+                                if isinstance(msg_content, dict):
+                                    msg_content['id'] = msg_id  # Inject ID
+                                    parsed_messages.append(msg_content)
+                            return parsed_messages
+                        elif isinstance(messages_container, list):
+                            return messages_container
+                            
+                    # Case 2: Direct list (some versions)
                     if isinstance(sms_data, list):
                         return sms_data
-                    # If it's a dict with messages key
-                    if isinstance(sms_data, dict) and "messages" in sms_data:
-                        return sms_data["messages"]
-                        
-                # Fallback
-                if "messages" in response_data:
-                    return response_data["messages"]
-            
+
             return []
             
         except Exception as e:
             logger.error(f"Failed to get SMS list: {e}")
             return []
-
     def delete_sms(self, sms_id: str) -> bool:
         """Delete SMS by ID using command structure"""
         # Command: [{"sms":{"delete":[{"interface":"UsbLte0","id":"nv-28"}]}}]
@@ -378,12 +387,19 @@ class KeeneticClient:
 
     def get_sms_capacity(self) -> Dict[str, Any]:
         """Get SMS storage capacity"""
+        try:
+            all_sms = self.get_all_sms()
+            sim_used = len(all_sms)
+        except Exception as e:
+            logger.warning(f"Failed to count SMS for capacity: {e}")
+            sim_used = 0
+
         return {
-            "SIMUsed": 0,
-            "SIMSize": 0,
-            "PhoneUsed": 0,
-            "PhoneSize": 0,
-            "TemplatesUsed": 0
+            "SIMUsed": sim_used,
+            "SIMSize": 0, # don't using
+            "PhoneUsed": 0, # don't using
+            "PhoneSize": 0, # don't using
+            "TemplatesUsed": 0 # don't using
         }
         
     def get_sim_imsi(self) -> str:
